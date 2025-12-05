@@ -1,10 +1,10 @@
-// lib/models.dart
 class CardModel {
   final int? id;
   String title;
   String content;
-  String? imageUrl; // 新增：图片的 URL
+  List<String> imageUrls;
   bool isMarked;
+  bool isCompleted; // 新增：完成状态
   
   String groupName;
   String tags;
@@ -18,8 +18,9 @@ class CardModel {
     this.id,
     required this.title,
     required this.content,
-    this.imageUrl,
+    this.imageUrls = const [],
     this.isMarked = false,
+    this.isCompleted = false, // 默认未完成
     this.groupName = '默认清单',
     this.tags = '',
     required this.createdAt,
@@ -40,7 +41,9 @@ class CardModel {
     return null;
   }
 
+  // 只有在【未完成】且【已过期】时才算 isDue
   bool get isDue {
+    if (isCompleted) return false; // 完成了就不催了
     final next = nextReminderTime;
     if (next == null) return false;
     return DateTime.now().isAfter(next);
@@ -51,8 +54,9 @@ class CardModel {
       id: json['id'],
       title: json['title'],
       content: json['content'] ?? '',
-      imageUrl: json['image_url'], // 后端返回的是完整 URL
+      imageUrls: List<String>.from(json['image_urls'] ?? []),
       isMarked: json['is_marked'] ?? false,
+      isCompleted: json['is_completed'] ?? false, // 读字段
       groupName: json['group_name'] ?? '默认清单',
       tags: json['tags'] ?? '',
       createdAt: json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now(),
@@ -66,9 +70,8 @@ class CardModel {
     return {
       'title': title,
       'content': content,
-      // 注意：这里不传 imageUrl，因为图片上传逻辑是分离的，只传 image_path (文件名)
-      // 这个逻辑在 api_service 或 main.dart 里处理
       'is_marked': isMarked,
+      'is_completed': isCompleted, // 写字段
       'group_name': groupName,
       'tags': tags,
       'reminder_type': reminderType,
