@@ -22,10 +22,21 @@ class ApiService {
     await http.post(Uri.parse('$baseUrl/cards'), headers: {'Content-Type': 'application/json'}, body: jsonEncode(data));
   }
 
-  static Future<void> updateCard(int id, CardModel card, List<String> imageFilenames) async {
+// 修改：imageFilenames 改为可空类型 List<String>?
+  static Future<void> updateCard(int id, CardModel card, List<String>? imageFilenames) async {
     final Map<String, dynamic> data = card.toJson();
-    data['image_paths'] = imageFilenames;
-    await http.put(Uri.parse('$baseUrl/cards/$id'), headers: {'Content-Type': 'application/json'}, body: jsonEncode(data));
+    
+    // 只有当 imageFilenames 不为 null 时，才去更新图片
+    // 如果传了 null，说明这次操作不涉及图片修改，后端会保持原样
+    if (imageFilenames != null) {
+      data['image_paths'] = imageFilenames;
+    }
+    
+    await http.put(
+      Uri.parse('$baseUrl/cards/$id'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(data),
+    );
   }
 
   static Future<void> deleteCard(int id) async {

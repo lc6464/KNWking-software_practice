@@ -2,7 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:flutter_markdown/flutter_markdown.dart'; // 引入 Markdown
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter/services.dart'; // 新增：用于限制输入只能是数字
+import 'dart:ui'; 
 import 'models.dart';
 import 'api_service.dart';
 
@@ -12,16 +14,29 @@ void main() {
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '卡片记忆助手 Pro Max Ultra',
+      title: '卡片记忆助手 Ultimate',
       theme: ThemeData(primarySwatch: Colors.blue, useMaterial3: true),
+      // 允许鼠标拖拽
+      scrollBehavior: const MaterialScrollBehavior().copyWith(
+        dragDevices: {
+          PointerDeviceKind.mouse,
+          PointerDeviceKind.touch,
+          PointerDeviceKind.stylus,
+          PointerDeviceKind.trackpad,
+        },
+      ),
       home: const CardListPage(),
     );
   }
 }
 
+// ==========================================
+// 1. 列表页 (CardListPage)
+// ==========================================
 class CardListPage extends StatefulWidget {
   const CardListPage({super.key});
   @override
@@ -51,7 +66,8 @@ class _CardListPageState extends State<CardListPage> {
 
   void _startTimer() {
     _stopTimer();
-    _timer = Timer.periodic(const Duration(seconds: 10), (timer) {
+    // === 修改 1：同步间隔改为 3 秒 ===
+    _timer = Timer.periodic(const Duration(seconds: 3), (timer) {
       _fetchData(silent: true);
     });
   }
@@ -164,18 +180,14 @@ class _CardListPageState extends State<CardListPage> {
     );
   }
 
-  // 切换完成状态
   Future<void> _toggleCompletion(CardModel card) async {
-    // 先在 UI 上给个反馈（乐观更新），也可以直接调接口后刷新
     card.isCompleted = !card.isCompleted;
-    // 调接口
-    await ApiService.updateCard(card.id!, card, []); // 这里其实不需要传图片列表，但接口定义需要
+    await ApiService.updateCard(card.id!, card, null); 
     _fetchData(silent: true);
   }
 
   @override
   Widget build(BuildContext context) {
-    // 1. 先筛选分组
     List<CardModel> filtered;
     if (_currentGroup == 'ALL') {
       filtered = List.from(_allCards);
@@ -183,12 +195,9 @@ class _CardListPageState extends State<CardListPage> {
       filtered = _allCards.where((c) => c.groupName == _currentGroup).toList();
     }
 
-    // 2. 拆分已完成和未完成
     final incompleteCards = filtered.where((c) => !c.isCompleted).toList();
     final completedCards = filtered.where((c) => c.isCompleted).toList();
 
-    // 3. 分别排序
-    // 未完成：有提醒优先 > 提醒时间近优先 > 创建时间新优先
     incompleteCards.sort((a, b) {
       final aTime = a.nextReminderTime;
       final bTime = b.nextReminderTime;
@@ -198,7 +207,6 @@ class _CardListPageState extends State<CardListPage> {
       return b.createdAt.compareTo(a.createdAt);
     });
 
-    // 已完成：按创建时间倒序（或者按最后修改时间，这里暂用创建时间）
     completedCards.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
     return Scaffold(
@@ -250,30 +258,27 @@ class _CardListPageState extends State<CardListPage> {
       body: _isLoading 
           ? const Center(child: CircularProgressIndicator()) 
           : SingleChildScrollView(
+              // === 关键修复 2：增加底部内边距 ===
+              // 这里的 120 像素是为了保证列表内容永远不会被 FAB 遮挡
+              // 同时也给了 ExpansionTile 展开动画足够的缓冲空间，防止 14px 溢出
+              padding: const EdgeInsets.only(bottom: 120),
               child: Column(
                 children: [
-                  // === 蓝色方框 1: 未完成 ===
                   ExpansionTile(
-                    initiallyExpanded: true, // 默认展开
+                    initiallyExpanded: true,
                     title: const Text("待办事项", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
                     children: incompleteCards.isEmpty 
                       ? [const Padding(padding: EdgeInsets.all(20), child: Text("没有待办任务，真棒！", style: TextStyle(color: Colors.grey)))]
                       : incompleteCards.map((c) => _buildCardItem(c)).toList(),
                   ),
-                  
-                  const Divider(thickness: 5, color: Colors.grey), // 分隔线
-
-                  // === 蓝色方框 2: 已完成 ===
+                  const Divider(thickness: 5, color: Colors.grey), 
                   ExpansionTile(
-                    initiallyExpanded: false, // 默认折叠，保持界面清爽
+                    initiallyExpanded: false, 
                     title: const Text("已完成", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
                     children: completedCards.isEmpty
                       ? [const Padding(padding: EdgeInsets.all(20), child: Text("还没有完成的任务", style: TextStyle(color: Colors.grey)))]
                       : completedCards.map((c) => _buildCardItem(c)).toList(),
                   ),
-                  
-                  // 底部留白，防止被 FAB 遮挡
-                  const SizedBox(height: 80), 
                 ],
               ),
             ),
@@ -298,13 +303,24 @@ class _CardListPageState extends State<CardListPage> {
     final isDue = card.isDue;
     final isDone = card.isCompleted;
 
+    String timeStr = '';
+    Color timeColor = Colors.black54;
+
+    if (card.nextReminderTime != null) {
+      timeStr = DateFormat('MM-dd HH:mm').format(card.nextReminderTime!);
+      if (isDone) {
+        timeColor = Colors.grey;
+      } else if (isDue) {
+        timeColor = Colors.red;
+      }
+    }
+
     Widget buildTags() {
       if (card.tags.isEmpty) return const SizedBox();
       final tags = card.tags.split(',').where((e) => e.isNotEmpty).toList();
       return Wrap(
         spacing: 4,
         children: tags.map((t) {
-          // 已完成的标签也变灰
           Color bg = isDone ? Colors.grey.shade200 : (t.contains('高') ? Colors.red.shade100 : Colors.blue.shade50);
           Color text = isDone ? Colors.grey : Colors.black87;
           return Container(
@@ -317,26 +333,15 @@ class _CardListPageState extends State<CardListPage> {
     }
     final coverImage = card.imageUrls.isNotEmpty ? card.imageUrls.first : null;
 
-    // 已完成的样式：灰色 + 删除线
     final titleStyle = TextStyle(
-      fontWeight: FontWeight.bold, 
-      fontSize: 16, 
+      fontWeight: FontWeight.bold,
+      fontSize: 16,
       color: isDone ? Colors.grey : (isDue ? Colors.red : Colors.black),
       decoration: isDone ? TextDecoration.lineThrough : null,
     );
-    
-    // Markdown 样式表
-    final markdownSheet = MarkdownStyleSheet(
-      p: TextStyle(color: isDone ? Colors.grey : Colors.black87, decoration: isDone ? TextDecoration.lineThrough : null),
-      h1: TextStyle(color: isDone ? Colors.grey : Colors.black, fontWeight: FontWeight.bold, fontSize: 20, decoration: isDone ? TextDecoration.lineThrough : null),
-      h2: TextStyle(color: isDone ? Colors.grey : Colors.black, fontWeight: FontWeight.bold, fontSize: 18, decoration: isDone ? TextDecoration.lineThrough : null),
-      strong: const TextStyle(fontWeight: FontWeight.bold),
-      em: const TextStyle(fontStyle: FontStyle.italic),
-      del: const TextStyle(decoration: TextDecoration.lineThrough),
-    );
 
     return Card(
-      elevation: isDone ? 0 : 2, // 已完成的扁平化
+      elevation: isDone ? 0 : 2,
       color: isDone ? Colors.grey.shade50 : (isDue ? Colors.red.shade50 : Colors.white),
       shape: isDue ? RoundedRectangleBorder(side: const BorderSide(color: Colors.red), borderRadius: BorderRadius.circular(12)) : null,
       margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -344,7 +349,7 @@ class _CardListPageState extends State<CardListPage> {
         onTap: () async {
           _stopTimer();
           await Navigator.push(context, MaterialPageRoute(
-            builder: (_) => CardEditPage(card: card, availableGroups: _availableGroups, availableTags: _availableTags),
+            builder: (_) => CardDetailPage(card: card, availableGroups: _availableGroups, availableTags: _availableTags),
           ));
           _fetchData();
           _startTimer();
@@ -355,10 +360,8 @@ class _CardListPageState extends State<CardListPage> {
             if (coverImage != null)
               ClipRRect(
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-                child: ColorFiltered( // 已完成的图片变灰
-                  colorFilter: isDone 
-                    ? const ColorFilter.mode(Colors.grey, BlendMode.saturation) 
-                    : const ColorFilter.mode(Colors.transparent, BlendMode.multiply),
+                child: ColorFiltered(
+                  colorFilter: isDone ? const ColorFilter.mode(Colors.grey, BlendMode.saturation) : const ColorFilter.mode(Colors.transparent, BlendMode.multiply),
                   child: Image.network(coverImage, height: 150, width: double.infinity, fit: BoxFit.cover, errorBuilder: (ctx, err, stack) => Container(height: 150, color: Colors.grey.shade200, child: const Icon(Icons.broken_image))),
                 ),
               ),
@@ -367,43 +370,53 @@ class _CardListPageState extends State<CardListPage> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // === 复选框 ===
                   Padding(
                     padding: const EdgeInsets.only(right: 8.0, top: 4.0),
                     child: SizedBox(
                       width: 24, height: 24,
-                      child: Checkbox(
-                        value: isDone,
-                        onChanged: (val) => _toggleCompletion(card),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                      ),
+                      child: Checkbox(value: isDone, onChanged: (val) => _toggleCompletion(card), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4))),
                     ),
                   ),
-                  
-                  // === 标题和内容 ===
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(children: [
-                          Expanded(child: Text(card.title, style: titleStyle)),
-                          if (isDue && !isDone) const Icon(Icons.alarm, color: Colors.red, size: 16),
-                        ]),
+                        Row(children: [Expanded(child: Text(card.title, style: titleStyle)), if (isDue && !isDone) const Icon(Icons.alarm, color: Colors.red, size: 16)]),
+
+                        // === 修复的核心代码 ===
                         if (card.content.isNotEmpty) ...[
                           const SizedBox(height: 6),
-                          // === 使用 Markdown 渲染内容 ===
-                          // 限制最大高度，防止长文撑爆列表，点击进去看详情
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxHeight: 100),
-                            child: MarkdownBody(
-                              data: card.content,
-                              styleSheet: markdownSheet,
-                              fitContent: true,
+                          Text(
+                            _stripMarkdown(card.content),
+                            maxLines: 3, // 只显示3行，超出自动截断
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: isDone ? Colors.grey : Colors.black54,
+                              fontSize: 14,
+                              height: 1.4,
+                              decoration: isDone ? TextDecoration.lineThrough : null,
                             ),
                           ),
                         ],
+                        // === 修复结束 ===
+
                         const SizedBox(height: 8),
-                        Row(children: [buildTags(), const Spacer(), Text(card.groupName, style: const TextStyle(fontSize: 12, color: Colors.grey))])
+                        Row(
+                          children: [
+                            buildTags(),
+                            const SizedBox(width: 8),
+                            if (timeStr.isNotEmpty)
+                              Row(
+                                children: [
+                                  Icon(Icons.access_time, size: 12, color: timeColor),
+                                  const SizedBox(width: 2),
+                                  Text(timeStr, style: TextStyle(fontSize: 12, color: timeColor, fontWeight: (isDue && !isDone) ? FontWeight.bold : FontWeight.normal)),
+                                ],
+                              ),
+                            const Spacer(),
+                            Text(card.groupName, style: const TextStyle(fontSize: 12, color: Colors.grey))
+                          ],
+                        )
                       ],
                     ),
                   ),
@@ -417,51 +430,154 @@ class _CardListPageState extends State<CardListPage> {
   }
 }
 
-// === 搜索功能 Delegate ===
-class CardSearchDelegate extends SearchDelegate {
-  final List<CardModel> allCards;
+// ==========================================
+// 2. 详情页 (CardDetailPage)
+// ==========================================
+class CardDetailPage extends StatefulWidget {
+  final CardModel card;
   final List<String> availableGroups;
   final List<String> availableTags;
-  CardSearchDelegate({required this.allCards, required this.availableGroups, required this.availableTags});
-  
-  @override
-  String get searchFieldLabel => '搜索...';
-  @override
-  List<Widget>? buildActions(BuildContext context) => [if (query.isNotEmpty) IconButton(icon: const Icon(Icons.clear), onPressed: () => query = '')];
-  @override
-  Widget? buildLeading(BuildContext context) => IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => close(context, null));
-  @override
-  Widget buildResults(BuildContext context) => _buildList(context);
-  @override
-  Widget buildSuggestions(BuildContext context) => _buildList(context);
 
-  Widget _buildList(BuildContext context) {
-    final q = query.toLowerCase();
-    final results = allCards.where((card) {
-      return card.title.toLowerCase().contains(q) || card.content.toLowerCase().contains(q) || card.tags.toLowerCase().contains(q);
-    }).toList();
-    
-    if (results.isEmpty) return const Center(child: Text('没有找到相关卡片'));
-    
-    return ListView.builder(
-      itemCount: results.length,
-      itemBuilder: (context, index) {
-        final card = results[index];
-        return ListTile(
-          leading: Icon(card.isCompleted ? Icons.check_circle : Icons.circle_outlined, color: card.isCompleted ? Colors.green : Colors.grey),
-          title: Text(card.title, style: TextStyle(decoration: card.isCompleted ? TextDecoration.lineThrough : null)),
-          subtitle: Text(card.content, maxLines: 1, overflow: TextOverflow.ellipsis),
-          trailing: Text(card.groupName, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          onTap: () {
-            close(context, null);
-            Navigator.push(context, MaterialPageRoute(builder: (_) => CardEditPage(card: card, availableGroups: availableGroups, availableTags: availableTags)));
-          },
-        );
-      },
+  const CardDetailPage({super.key, required this.card, required this.availableGroups, required this.availableTags});
+
+  @override
+  State<CardDetailPage> createState() => _CardDetailPageState();
+}
+
+class _CardDetailPageState extends State<CardDetailPage> {
+  late CardModel _card;
+  int _currentImageIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _card = widget.card;
+  }
+
+  Future<void> _refreshCard() async {
+    final cards = await ApiService.fetchCards();
+    try {
+      final updated = cards.firstWhere((c) => c.id == _card.id);
+      setState(() => _card = updated);
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('详情'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.edit),
+            onPressed: () async {
+              await Navigator.push(context, MaterialPageRoute(
+                builder: (_) => CardEditPage(card: _card, availableGroups: widget.availableGroups, availableTags: widget.availableTags),
+              ));
+              _refreshCard();
+            },
+          )
+        ],
+      ),
+      body: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_card.imageUrls.isNotEmpty)
+              Stack(
+                alignment: Alignment.bottomRight,
+                children: [
+                  SizedBox(
+                    height: 300,
+                    child: PageView.builder(
+                      itemCount: _card.imageUrls.length,
+                      onPageChanged: (index) {
+                        setState(() {
+                          _currentImageIndex = index;
+                        });
+                      },
+                      itemBuilder: (context, index) {
+                         return GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => FullScreenImageViewer(imageUrls: _card.imageUrls, initialIndex: index),
+                              ),
+                            );
+                          },
+                          child: Image.network(
+                            _card.imageUrls[index],
+                            fit: BoxFit.contain,
+                            loadingBuilder: (ctx, child, loading) {
+                              if (loading == null) return child;
+                              return const Center(child: CircularProgressIndicator());
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  Container(
+                    margin: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
+                    child: Text("${_currentImageIndex + 1} / ${_card.imageUrls.length}", style: const TextStyle(color: Colors.white, fontSize: 12)),
+                  ),
+                ],
+              ),
+            
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_card.title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(4)),
+                        child: Text(_card.groupName, style: const TextStyle(fontSize: 12)),
+                      ),
+                      const SizedBox(width: 8),
+                      if (_card.tags.isNotEmpty)
+                        ..._card.tags.split(',').map((t) => Padding(
+                          padding: const EdgeInsets.only(right: 4.0),
+                          child: Chip(label: Text(t, style: const TextStyle(fontSize: 10)), visualDensity: VisualDensity.compact),
+                        )),
+                    ],
+                  ),
+                  const Divider(height: 32),
+
+                  MarkdownBody(
+                    data: _card.content,
+                    selectable: true,
+                    styleSheet: MarkdownStyleSheet(
+                      h1: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                      h2: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      p: const TextStyle(fontSize: 16),
+                      blockquote: const TextStyle(color: Colors.grey),
+                    ),
+                  ),
+                  const SizedBox(height: 40),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
 
+// ==========================================
+// 3. 编辑页 (CardEditPage)
+// ==========================================
 class CardEditPage extends StatefulWidget {
   final CardModel? card;
   final List<String> availableGroups;
@@ -519,7 +635,7 @@ class _CardEditPageState extends State<CardEditPage> {
     );
     if (confirm == true) {
       await ApiService.deleteCard(widget.card!.id!);
-      if (mounted) Navigator.pop(context);
+      if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
     }
   }
 
@@ -541,7 +657,7 @@ class _CardEditPageState extends State<CardEditPage> {
       title: _titleCtrl.text,
       content: _contentCtrl.text,
       isMarked: widget.card?.isMarked ?? false,
-      isCompleted: widget.card?.isCompleted ?? false, // 保持状态
+      isCompleted: widget.card?.isCompleted ?? false,
       groupName: _selectedGroup!,
       tags: _selectedTags.join(','),
       createdAt: widget.card?.createdAt ?? DateTime.now(),
@@ -575,7 +691,6 @@ class _CardEditPageState extends State<CardEditPage> {
               TextFormField(controller: _titleCtrl, decoration: const InputDecoration(labelText: '标题'), validator: (v) => v!.isEmpty ? '必填' : null),
               const SizedBox(height: 10),
               
-              // === Markdown 提示 ===
               const Row(
                 children: [
                   Icon(Icons.description, size: 16, color: Colors.grey),
@@ -586,16 +701,12 @@ class _CardEditPageState extends State<CardEditPage> {
               const SizedBox(height: 4),
               TextFormField(
                 controller: _contentCtrl, 
-                decoration: const InputDecoration(
-                  labelText: '内容 (Markdown)', 
-                  alignLabelWithHint: true,
-                  border: OutlineInputBorder(),
-                ), 
+                decoration: const InputDecoration(labelText: '内容 (Markdown)', alignLabelWithHint: true, border: OutlineInputBorder()), 
                 maxLines: 8,
               ),
               const SizedBox(height: 16),
               
-              const Text("图片 (第一张为封面)", style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text("图片", style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8, runSpacing: 8,
@@ -629,7 +740,21 @@ class _CardEditPageState extends State<CardEditPage> {
                 items: const [DropdownMenuItem(value: 'none', child: Text('无提醒')), DropdownMenuItem(value: 'periodic', child: Text('周期提醒 (天数)')), DropdownMenuItem(value: 'specific', child: Text('定点提醒 (日期)'))],
                 onChanged: (v) => setState(() => _reminderType = v!),
               ),
-              if (_reminderType == 'periodic') TextFormField(controller: _periodicCtrl, decoration: const InputDecoration(labelText: '每隔几天?'), keyboardType: TextInputType.number),
+              if (_reminderType == 'periodic')
+                // === 修改 3：周期提醒只能输入数字 ===
+                TextFormField(
+                  controller: _periodicCtrl, 
+                  decoration: const InputDecoration(labelText: '每隔几天?'), 
+                  keyboardType: TextInputType.number,
+                  // 限制只能输入数字
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  // 增加校验
+                  validator: (v) {
+                    if (v == null || v.isEmpty) return '请输入天数';
+                    if (int.tryParse(v) == 0) return '天数不能为0';
+                    return null;
+                  },
+                ),
               if (_reminderType == 'specific') ListTile(title: Text(_reminderValue.isEmpty ? '选择时间' : _reminderValue), trailing: const Icon(Icons.calendar_today), onTap: () async { final d = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime.now(), lastDate: DateTime(2100)); if (d != null) { final t = await showTimePicker(context: context, initialTime: TimeOfDay.now()); if (t != null) { setState(() => _reminderValue = DateFormat('yyyy-MM-dd HH:mm').format(DateTime(d.year, d.month, d.day, t.hour, t.minute))); } } }),
               const SizedBox(height: 30),
               ElevatedButton(onPressed: _save, style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)), child: const Text('保存')),
@@ -639,4 +764,173 @@ class _CardEditPageState extends State<CardEditPage> {
       ),
     );
   }
+}
+
+// ==========================================
+// 4. 全屏图片查看器
+// ==========================================
+class FullScreenImageViewer extends StatefulWidget {
+  final List<String> imageUrls;
+  final int initialIndex;
+
+  const FullScreenImageViewer({
+    super.key, 
+    required this.imageUrls, 
+    this.initialIndex = 0
+  });
+
+  @override
+  State<FullScreenImageViewer> createState() => _FullScreenImageViewerState();
+}
+
+class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
+  late PageController _pageController;
+  late int _currentIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          PageView.builder(
+            controller: _pageController,
+            itemCount: widget.imageUrls.length,
+            onPageChanged: (index) {
+              setState(() {
+                _currentIndex = index;
+              });
+            },
+            itemBuilder: (context, index) {
+              return InteractiveViewer(
+                minScale: 0.5,
+                maxScale: 4.0,
+                child: Center(
+                  child: Image.network(
+                    widget.imageUrls[index],
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              );
+            },
+          ),
+          Positioned(
+            top: 40,
+            left: 20,
+            child: IconButton(
+              icon: const Icon(Icons.close, color: Colors.white, size: 30),
+              onPressed: () => Navigator.pop(context),
+            ),
+          ),
+          Positioned(
+            bottom: 30,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(20)),
+                child: Text("${_currentIndex + 1} / ${widget.imageUrls.length}", style: const TextStyle(color: Colors.white, fontSize: 16)),
+              ),
+            ),
+          )
+        ],
+      ),
+    );
+  }
+}
+
+// Search Delegate
+class CardSearchDelegate extends SearchDelegate {
+  final List<CardModel> allCards;
+  final List<String> availableGroups;
+  final List<String> availableTags;
+  CardSearchDelegate({required this.allCards, required this.availableGroups, required this.availableTags});
+  @override
+  String get searchFieldLabel => '搜索...';
+  @override
+  List<Widget>? buildActions(BuildContext context) => [if (query.isNotEmpty) IconButton(icon: const Icon(Icons.clear), onPressed: () => query = '')];
+  @override
+  Widget? buildLeading(BuildContext context) => IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => close(context, null));
+  @override
+  Widget buildResults(BuildContext context) => _buildList(context);
+  @override
+  Widget buildSuggestions(BuildContext context) => _buildList(context);
+
+  Widget _buildList(BuildContext context) {
+    final q = query.toLowerCase();
+    final results = allCards.where((card) {
+      return card.title.toLowerCase().contains(q) || card.content.toLowerCase().contains(q) || card.tags.toLowerCase().contains(q);
+    }).toList();
+    if (results.isEmpty) return const Center(child: Text('没有找到相关卡片'));
+    return ListView.builder(
+      itemCount: results.length,
+      itemBuilder: (context, index) {
+        final card = results[index];
+        return ListTile(
+          leading: Icon(card.isCompleted ? Icons.check_circle : Icons.circle_outlined, color: card.isCompleted ? Colors.green : Colors.grey),
+          title: Text(card.title, style: TextStyle(decoration: card.isCompleted ? TextDecoration.lineThrough : null)),
+          subtitle: Text(card.content, maxLines: 1, overflow: TextOverflow.ellipsis),
+          onTap: () {
+            close(context, null);
+            Navigator.push(context, MaterialPageRoute(builder: (_) => CardDetailPage(card: card, availableGroups: availableGroups, availableTags: availableTags)));
+          },
+        );
+      },
+    );
+  }
+}
+
+// 辅助函数：去除 Markdown 符号，仅保留纯文本用于预览
+// 辅助函数：去除 Markdown 符号，仅保留纯文本用于预览
+String _stripMarkdown(String markdown) {
+  var text = markdown;
+
+  // 1. 替换标题 (# 标题 -> 标题)
+  text = text.replaceAll(RegExp(r'^#+\s*', multiLine: true), '');
+
+  // 2. 替换加粗/斜体 (**text**, *text*, __text__, _text_)
+  // 使用 replaceAllMapped 避免 $2 被当做普通字符输出
+  text = text.replaceAllMapped(
+    RegExp(r'(\*\*|__|[*_])(.+?)\1'), 
+    (match) => match.group(2) ?? ''
+  );
+
+  // 3. 替换删除线 (~~text~~ -> text)
+  text = text.replaceAllMapped(
+    RegExp(r'~~(.+?)~~'),
+    (match) => match.group(1) ?? ''
+  );
+
+  // 4. 替换行内代码 (`text` -> text)
+  text = text.replaceAllMapped(
+    RegExp(r'`([^`]+)`'),
+    (match) => match.group(1) ?? ''
+  );
+
+  // 5. 替换链接 ([text](url) -> text)
+  text = text.replaceAllMapped(
+    RegExp(r'\[([^\]]+)\]\([^\)]+\)'),
+    (match) => match.group(1) ?? ''
+  );
+
+  // 6. 去除列表符号 (- item, 1. item)
+  text = text.replaceAll(RegExp(r'^\s*[\-\*]\s+', multiLine: true), '');
+  text = text.replaceAll(RegExp(r'^\s*\d+\.\s+', multiLine: true), '');
+
+  // 7. 去除引用符号 (> quote)
+  text = text.replaceAll(RegExp(r'^\s*>\s+', multiLine: true), '');
+
+  // 8. 去除图片 (![alt](url) -> [图片])
+  text = text.replaceAll(RegExp(r'!\[.*?\]\(.*?\)'), '[图片]');
+
+  // 9. 去除多余空行并修剪
+  return text.trim();
 }
