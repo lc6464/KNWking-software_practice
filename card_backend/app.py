@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 from flask import Flask, request, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
@@ -9,7 +10,22 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
-CORS(app)
+
+# === CORS 配置 ===
+# 允许所有来源，允许 Content-Type 和 Authorization 头，允许跨域携带凭证
+CORS(app,
+     resources={r"/*": {"origins": "*"}},
+     supports_credentials=True,
+     allow_headers=["Content-Type", "Authorization", "Access-Control-Allow-Credentials"])
+
+# === 请求日志 ===
+@app.before_request
+def log_request_info():
+    # 这样你能在终端看到每次前端发来的请求
+    print(f"Request: {request.method} {request.url}")
+    # 如果是 OPTIONS 请求（预检），直接放行
+    if request.method == "OPTIONS":
+        return jsonify({'status': 'ok'}), 200
 
 # === 配置部分 (适配云端部署) ===
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -113,9 +129,24 @@ def delete_card_logic(card):
 def get_or_create_meta(user_id):
     meta = MetaData.query.filter_by(user_id=user_id).first()
     if not meta:
-        meta = MetaData(user_id=user_id)
+        # 调试日志
+        print(f"--- Creating default meta for user {user_id} ---")
+        # 定义默认 JSON 字符串
+        default_groups = json.dumps(["默认清单", "学习", "工作"])
+        default_tags = json.dumps(["高优先级", "中优先级", "低优先级"])
+
+        # 创建时显式赋值，而不是依赖数据库的 default
+        meta = MetaData(
+            user_id=user_id,
+            groups_json=default_groups,
+            tags_json=default_tags
+        )
         db.session.add(meta)
         db.session.commit()
+
+        # 再次刷新对象，确保数据与数据库同步
+        db.session.refresh(meta)
+
     return meta
 
 
@@ -152,7 +183,8 @@ def login():
         return jsonify({'error': '用户名或密码错误'}), 401
 
     # identity 存 user_id
-    access_token = create_access_token(identity=user.id)
+    # identity 必须是字符串，所以用 str() 包裹 user.id
+    access_token = create_access_token(identity=str(user.id))
     return jsonify({'access_token': access_token, 'username': username}), 200
 
 
@@ -307,5 +339,9 @@ def delete_card(id):
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
+
+    # 调试用
+    print("Backend running on http://127.0.0.1:5000")
+
     # 注意：部署到云端时通常使用 Gunicorn，不直接用 app.run
     app.run(debug=True, host='0.0.0.0', port=5000)

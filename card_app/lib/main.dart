@@ -3,18 +3,23 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
-import 'package:flutter/services.dart'; // 新增：用于限制输入只能是数字
+import 'package:flutter/services.dart'; 
 import 'dart:ui'; 
 import 'models.dart';
 import 'api_service.dart';
 
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // 尝试恢复登录状态
+  bool hasToken = await ApiService.init();
 
-void main() {
-  runApp(const MyApp());
+  runApp(MyApp(isLoggedIn: hasToken));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final bool isLoggedIn;
+  const MyApp({super.key, required this.isLoggedIn});
 
   @override
   Widget build(BuildContext context) {
@@ -29,14 +34,13 @@ class MyApp extends StatelessWidget {
           PointerDeviceKind.trackpad,
         },
       ),
-      // 默认先进入登录页
-      home: const LoginPage(),
+      home: isLoggedIn ? const CardListPage() : const LoginPage(),
     );
   }
 }
 
 // ==========================================
-// 0. 登录页 (LoginPage) - 新增
+// 0. 登录页 (LoginPage)
 // ==========================================
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -63,11 +67,10 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _message = '正在处理...');
 
     if (_isRegistering) {
-      // 注册逻辑
       final error = await ApiService.register(username, password);
       if (error == null) {
         setState(() {
-          _isRegistering = false; // 注册成功切回登录
+          _isRegistering = false; 
           _message = '注册成功，请登录';
           _passwordCtrl.clear();
         });
@@ -75,11 +78,9 @@ class _LoginPageState extends State<LoginPage> {
         setState(() => _message = error);
       }
     } else {
-      // 登录逻辑
       final success = await ApiService.login(username, password);
       if (success) {
         if (!mounted) return;
-        // 登录成功，跳转到主列表页
         Navigator.pushReplacement(
           context, 
           MaterialPageRoute(builder: (_) => const CardListPage())
@@ -137,7 +138,7 @@ class _LoginPageState extends State<LoginPage> {
 }
 
 // ==========================================
-// 1. 列表页 (CardListPage) - 修改头部添加注销
+// 1. 列表页 (CardListPage)
 // ==========================================
 class CardListPage extends StatefulWidget {
   const CardListPage({super.key});
@@ -146,7 +147,6 @@ class CardListPage extends StatefulWidget {
 }
 
 class _CardListPageState extends State<CardListPage> {
-  // ... 原有的状态变量 ...
   List<CardModel> _allCards = [];
   List<String> _availableGroups = [];
   List<String> _availableTags = [];
@@ -194,7 +194,6 @@ class _CardListPageState extends State<CardListPage> {
       }
     } catch (e) {
       if (e.toString().contains('AuthError')) {
-        // 如果遇到 Token 失效，强制退回登录页
         _stopTimer();
         if (mounted) {
           ApiService.logout();
@@ -206,7 +205,6 @@ class _CardListPageState extends State<CardListPage> {
     }
   }
 
-  // ... _showConfirmDialog, _showManageDialog, _toggleCompletion 保持不变 ...
   Future<bool> _showConfirmDialog(String title, String content) async {
     return await showDialog<bool>(
       context: context,
@@ -220,10 +218,7 @@ class _CardListPageState extends State<CardListPage> {
       ),
     ) ?? false;
   }
-  // ... 省略中间未修改的辅助函数 (请将之前的辅助函数原样复制过来) ...
-  // 为了篇幅，我假设你保留了之前的 _showManageDialog, _toggleCompletion 等函数
 
-  // 下面是 _showManageDialog 和 _toggleCompletion 的实现 (为了确保你能直接复制，还是贴一下吧)
   void _showManageDialog(String type) {
     _stopTimer();
     final isGroup = type == 'group';
@@ -303,7 +298,6 @@ class _CardListPageState extends State<CardListPage> {
 
   @override
   Widget build(BuildContext context) {
-    // 筛选逻辑保持不变
     List<CardModel> filtered;
     if (_currentGroup == 'ALL') {
       filtered = List.from(_allCards);
@@ -314,7 +308,6 @@ class _CardListPageState extends State<CardListPage> {
     final incompleteCards = filtered.where((c) => !c.isCompleted).toList();
     final completedCards = filtered.where((c) => c.isCompleted).toList();
 
-    // 排序逻辑保持不变
     incompleteCards.sort((a, b) {
       final aTime = a.nextReminderTime;
       final bTime = b.nextReminderTime;
@@ -333,7 +326,6 @@ class _CardListPageState extends State<CardListPage> {
               decoration: BoxDecoration(color: Theme.of(context).primaryColor),
               child: const Center(child: Text('分组视图', style: TextStyle(color: Colors.white, fontSize: 24))),
             ),
-            // === 修改：增加“退出登录”按钮 ===
             ListTile(
               leading: const Icon(Icons.logout, color: Colors.red),
               title: const Text('退出登录', style: TextStyle(color: Colors.red)),
@@ -347,8 +339,6 @@ class _CardListPageState extends State<CardListPage> {
               },
             ),
             const Divider(),
-            // === 结束修改 ===
-            
             Expanded(
               child: ListView(
                 padding: EdgeInsets.zero,
@@ -428,20 +418,9 @@ class _CardListPageState extends State<CardListPage> {
     );
   }
 
+  // === 这里已经补全了完整的方法内容 ===
   Widget _buildCardItem(CardModel card) {
-    // ... 这个函数完全保持原样，直接复制之前修复过的版本即可 ...
-    // 为节省篇幅，此处省略，请务必保留之前 _stripMarkdown 的修复版本
-    // ⬇️⬇️⬇️ 请把之前那个完美的 _buildCardItem 复制到这里 ⬇️⬇️⬇️
-    return _originalBuildCardItem(card); 
-  }
-
-  // 临时占位，请用真实代码替换上面的 _buildCardItem
-  Widget _originalBuildCardItem(CardModel card) {
-    // 复制之前的代码逻辑...
-    // 包含 _stripMarkdown 的调用
-    // ...
-    // 这里为了不让代码太长，我只写关键结构，你用上一轮的完整代码覆盖即可
-     final isDue = card.isDue;
+    final isDue = card.isDue;
     final isDone = card.isCompleted;
 
     String timeStr = '';
@@ -780,7 +759,10 @@ class _CardEditPageState extends State<CardEditPage> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_selectedGroup == null) return;
+    
+    // === 修复：分组兜底逻辑 ===
+    String finalGroup = _selectedGroup ?? '默认清单';
+
     List<String> finalImageFilenames = [];
     for (var url in _existingImages) {
       final uri = Uri.parse(url);
@@ -797,7 +779,7 @@ class _CardEditPageState extends State<CardEditPage> {
       content: _contentCtrl.text,
       isMarked: widget.card?.isMarked ?? false,
       isCompleted: widget.card?.isCompleted ?? false,
-      groupName: _selectedGroup!,
+      groupName: finalGroup, // 使用确保非空的 finalGroup
       tags: _selectedTags.join(','),
       createdAt: widget.card?.createdAt ?? DateTime.now(),
       reminderType: _reminderType,
@@ -856,11 +838,17 @@ class _CardEditPageState extends State<CardEditPage> {
                 ],
               ),
               const SizedBox(height: 16),
+              
+              // === 修复：下拉菜单增加兜底项 ===
               DropdownButtonFormField<String>(
-                value: _selectedGroup, decoration: const InputDecoration(labelText: '分组', border: OutlineInputBorder()),
-                items: widget.availableGroups.map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
+                value: _selectedGroup, 
+                decoration: const InputDecoration(labelText: '分组', border: OutlineInputBorder()),
+                items: widget.availableGroups.isEmpty 
+                    ? [const DropdownMenuItem(value: '默认清单', child: Text('默认清单 (自动创建)'))]
+                    : widget.availableGroups.map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
                 onChanged: (v) => setState(() => _selectedGroup = v),
               ),
+              
               const SizedBox(height: 16),
               const Text("标签", style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
@@ -880,14 +868,11 @@ class _CardEditPageState extends State<CardEditPage> {
                 onChanged: (v) => setState(() => _reminderType = v!),
               ),
               if (_reminderType == 'periodic')
-                // === 修改 3：周期提醒只能输入数字 ===
                 TextFormField(
                   controller: _periodicCtrl, 
                   decoration: const InputDecoration(labelText: '每隔几天?'), 
                   keyboardType: TextInputType.number,
-                  // 限制只能输入数字
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  // 增加校验
                   validator: (v) {
                     if (v == null || v.isEmpty) return '请输入天数';
                     if (int.tryParse(v) == 0) return '天数不能为0';
@@ -1027,7 +1012,6 @@ class CardSearchDelegate extends SearchDelegate {
   }
 }
 
-// 辅助函数：去除 Markdown 符号，仅保留纯文本用于预览
 // 辅助函数：去除 Markdown 符号，仅保留纯文本用于预览
 String _stripMarkdown(String markdown) {
   var text = markdown;

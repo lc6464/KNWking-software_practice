@@ -5,6 +5,7 @@
 
 
 
+
 ### 配置说明
 
 前端使用 flutter，后端使用 flask。
@@ -35,13 +36,17 @@ flutter pub add http intl
 flutter pub add flutter_markdown
 ```
 
+因为要本地保存 token，需要添加
 
+```bash
+flutter pub add get shared_preferences
+```
 
 #### flask 说明
 
 对于 flask，执行
 
-```
+```bash
 pip install flask flask-sqlalchemy flask-cors flask-jwt-extended
 ```
 
