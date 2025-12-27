@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from data_models import Card, MetaData, User
 from extensions import cors, db, jwt
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 from flask_jwt_extended import (create_access_token, get_jwt_identity,
                                 jwt_required)
 from werkzeug.utils import secure_filename
@@ -85,13 +85,19 @@ def get_or_create_meta(user_id):
     return meta
 
 
-# === 请求日志 ===
+# === 预检请求 ===
 
 @app.before_request
-def log_request_info():
-    # 如果是 OPTIONS 请求（预检），直接放行
-    if request.method == "OPTIONS":
-        return jsonify({'status': 'ok'}), 200
+def process_options_request():
+    if request.method != "OPTIONS":
+        return
+
+    # 预检请求无需响应体，保持空返回
+    # 此处不应当使用 204 No Content，因为某些浏览器错误地认为该资源同样为空，不发送后续请求以获取该资源
+    # Flask 目前不支持移除 Content-Length 头，此处不做修改，保持默认行为 (Content-Length: 0)
+    response = Response(status=200)
+    response.headers.pop('Content-Type', None)
+    return response
 
 
 # === 认证接口 ===
