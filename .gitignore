@@ -35,7 +35,7 @@ __pycache__/
 .venv/
 
 # Database files and uploads
-uploads/*
+uploads/
 *.db
 
 # VS Code settings
